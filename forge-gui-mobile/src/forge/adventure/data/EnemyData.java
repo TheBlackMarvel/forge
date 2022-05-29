@@ -44,7 +44,7 @@ public class EnemyData {
         }
     }
 
-    public Deck generateDeck() {
-        return CardUtil.getDeck(deck);
+    public Deck generateDeck(boolean isFantasyMode, boolean useGeneticAI) {
+        return CardUtil.getDeck(deck, true, isFantasyMode, colors, life > 13, life > 16 && useGeneticAI);
     }
 }

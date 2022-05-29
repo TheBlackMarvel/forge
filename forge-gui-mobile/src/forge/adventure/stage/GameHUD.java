@@ -6,10 +6,12 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Touchpad;
+import com.badlogic.gdx.scenes.scene2d.utils.ActorGestureListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Scaling;
@@ -23,6 +25,7 @@ import forge.adventure.util.Controls;
 import forge.adventure.util.Current;
 import forge.adventure.util.UIActor;
 import forge.adventure.world.WorldSave;
+import forge.gui.FThreads;
 import forge.gui.GuiBase;
 
 /**
@@ -41,7 +44,9 @@ public class GameHUD extends Stage {
     private UIActor ui;
     private Touchpad touchpad;
     private Console console;
-    float TOUCHPAD_SCALE = 70f;
+    float TOUCHPAD_SCALE = 70f, referenceX;
+    boolean isHiding = false, isShowing = false;
+    float opacity = 1f;
 
     private GameHUD(GameStage gameStage) {
         super(new ScalingViewport(Scaling.stretch, Scene.getIntendedWidth(), Scene.getIntendedHeight()), gameStage.getBatch());
@@ -59,6 +64,7 @@ public class GameHUD extends Stage {
         deckActor = ui.findActor("deck");
         deckActor.getLabel().setText(Forge.getLocalizer().getMessage("lblDeck"));
         menuActor = ui.findActor("menu");
+        referenceX = menuActor.getX();
         menuActor.getLabel().setText(Forge.getLocalizer().getMessage("lblMenu"));
         statsActor = ui.findActor("statistic");
         statsActor.getLabel().setText(Forge.getLocalizer().getMessage("lblStatus"));
@@ -108,9 +114,14 @@ public class GameHUD extends Stage {
         addActor(ui);
         addActor(miniMapPlayer);
         console=new Console();
-        console.setBounds(0,0,getWidth(),getHeight()/2);
+        console.setBounds(0, GuiBase.isAndroid() ? getHeight() : 0, getWidth(),getHeight()/2);
         console.setVisible(false);
         ui.addActor(console);
+        if (GuiBase.isAndroid()) {
+            avatar.addListener(new ConsoleToggleListener());
+            avatarborder.addListener(new ConsoleToggleListener());
+            gamehud.addListener(new ConsoleToggleListener());
+        }
         WorldSave.getCurrentSave().onLoad(new Runnable() {
             @Override
             public void run() {
@@ -180,7 +191,7 @@ public class GameHUD extends Stage {
             return true;
         }
         //auto follow touchpad
-        if (GuiBase.isAndroid()) {
+        if (GuiBase.isAndroid() && !MapStage.getInstance().getDialogOnlyInput() && !console.isVisible()) {
             if (!(Controls.actorContainsVector(miniMap,touch)) // not inside map bounds
                     && !(Controls.actorContainsVector(gamehud,touch)) //not inside gamehud bounds
                     && !(Controls.actorContainsVector(menuActor,touch)) //not inside menu button
@@ -209,6 +220,8 @@ public class GameHUD extends Stage {
         int xPosMini = (int) (((float) xPos / (float) WorldSave.getCurrentSave().getWorld().getTileSize() / (float) WorldSave.getCurrentSave().getWorld().getWidthInTiles()) * miniMap.getWidth());
         int yPosMini = (int) (((float) yPos / (float) WorldSave.getCurrentSave().getWorld().getTileSize() / (float) WorldSave.getCurrentSave().getWorld().getHeightInTiles()) * miniMap.getHeight());
         miniMapPlayer.setPosition(miniMap.getX() + xPosMini - miniMapPlayer.getWidth()/2, miniMap.getY() + yPosMini -  miniMapPlayer.getHeight()/2);
+        if (GuiBase.isAndroid()) // prevent drawing on top of console
+            miniMapPlayer.setVisible(!console.isVisible()&&miniMap.isVisible());
 
     }
 
@@ -248,11 +261,13 @@ public class GameHUD extends Stage {
             menuActor.getColor().a = 1f;
             statsActor.getColor().a = 1f;
             inventoryActor.getColor().a = 1f;
+            opacity = 1f;
         } else {
             deckActor.getColor().a = 0.5f;
             menuActor.getColor().a = 0.5f;
             statsActor.getColor().a = 0.5f;
             inventoryActor.getColor().a = 0.5f;
+            opacity = 0.5f;
         }
     }
 
@@ -269,17 +284,52 @@ public class GameHUD extends Stage {
             return true;
         }
         if (keycode == Input.Keys.BACK) {
-            menuActor.setVisible(!menuActor.isVisible());
-            statsActor.setVisible(!statsActor.isVisible());
-            inventoryActor.setVisible(!inventoryActor.isVisible());
-            deckActor.setVisible(!deckActor.isVisible());
+            if (console.isVisible()) {
+                console.toggle();
+            } else {
+                if (menuActor.isVisible())
+                    hideButtons();
+                else
+                    showButtons();
+            }
         }
         return super.keyDown(keycode);
     }
     public void hideButtons() {
-        menuActor.setVisible(false);
-        deckActor.setVisible(false);
-        inventoryActor.setVisible(false);
-        statsActor.setVisible(false);
+        if (isShowing)
+            return;
+        if (isHiding)
+            return;
+        isHiding = true;
+        deckActor.addAction(Actions.sequence(Actions.fadeOut(0.10f), Actions.hide(), Actions.moveTo(deckActor.getX()+deckActor.getWidth(), deckActor.getY())));
+        inventoryActor.addAction(Actions.sequence(Actions.fadeOut(0.15f), Actions.hide(), Actions.moveTo(inventoryActor.getX()+inventoryActor.getWidth(), inventoryActor.getY())));
+        statsActor.addAction(Actions.sequence(Actions.fadeOut(0.20f), Actions.hide(), Actions.moveTo(statsActor.getX()+statsActor.getWidth(), statsActor.getY())));
+        menuActor.addAction(Actions.sequence(Actions.fadeOut(0.25f), Actions.hide(), Actions.moveTo(menuActor.getX() + menuActor.getWidth(), menuActor.getY())));
+        FThreads.delayInEDT(300, () -> isHiding = false);
+    }
+    public void showButtons() {
+        if (console.isVisible())
+            return;
+        if (isHiding)
+            return;
+        if (isShowing)
+            return;
+        isShowing = true;
+        menuActor.addAction(Actions.sequence(Actions.delay(0.1f), Actions.parallel(Actions.show(), Actions.alpha(opacity,0.1f), Actions.moveTo(referenceX, menuActor.getY(), 0.25f))));
+        statsActor.addAction(Actions.sequence(Actions.delay(0.15f), Actions.parallel(Actions.show(), Actions.alpha(opacity,0.1f), Actions.moveTo(referenceX, statsActor.getY(), 0.25f))));
+        inventoryActor.addAction(Actions.sequence(Actions.delay(0.2f), Actions.parallel(Actions.show(), Actions.alpha(opacity,0.1f), Actions.moveTo(referenceX, inventoryActor.getY(), 0.25f))));
+        deckActor.addAction(Actions.sequence(Actions.delay(0.25f), Actions.parallel(Actions.show(), Actions.alpha(opacity,0.1f), Actions.moveTo(referenceX, deckActor.getY(), 0.25f))));
+        FThreads.delayInEDT(300, () -> isShowing = false);
+    }
+    class ConsoleToggleListener extends ActorGestureListener {
+        public ConsoleToggleListener() {
+            getGestureDetector().setLongPressSeconds(0.5f);
+        }
+        @Override
+        public boolean longPress(Actor actor, float x, float y) {
+            hideButtons();
+            console.toggle();
+            return super.longPress(actor, x, y);
+        }
     }
 }
